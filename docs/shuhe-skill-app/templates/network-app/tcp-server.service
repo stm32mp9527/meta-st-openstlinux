@@ -1,0 +1,13 @@
+[Unit]
+Description=Customer TCP server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tcp-server 9000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

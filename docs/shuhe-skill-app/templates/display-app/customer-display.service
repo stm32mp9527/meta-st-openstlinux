@@ -1,0 +1,14 @@
+[Unit]
+Description=Customer fullscreen display
+After=weston-graphical-session.service
+Wants=weston-graphical-session.service
+
+[Service]
+Type=simple
+User=weston
+ExecStart=/usr/bin/customer-display.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

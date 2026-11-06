@@ -1,0 +1,19 @@
+[Unit]
+Description=Battery monitor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# Adjust these paths to the customer's power_supply / hwmon / IIO device.
+Environment=BAT_VOLTAGE=/sys/class/power_supply/battery/voltage_now
+Environment=BAT_CURRENT=/sys/class/power_supply/battery/current_now
+Environment=BAT_TEMP=/sys/class/power_supply/battery/temp
+Environment=BAT_INTERVAL=5
+Environment=BAT_LOG=/var/log/battery.csv
+ExecStart=/usr/bin/battery-monitor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
