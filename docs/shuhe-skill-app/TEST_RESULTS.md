@@ -9,12 +9,12 @@
 | `tcp-server.c` 本机编译/运行 | x86_64 gcc `-Wall -Wextra -Werror` | 编译通过；TCP 回环 `hello`→`OK`；SIGTERM 干净退出 |
 | `tcp-server` Yocto 交叉编译 | `MACHINE=stm32mp2-m33td`，scarthgap，aarch64 | `tcp-server_1.0-r0.0_arm64.deb`；`/usr/bin/tcp-server` + service + preset；`Depends: libc6` |
 | `battery-monitor.c` 本机 mock 测试 | x86_64 gcc + mock sysfs | 4.000V/0.500A/25.0C/SOC 83.3%；CSV 写入；SIGTERM 干净退出 |
-| `battery-monitor` Yocto 交叉编译 | 同上 | `battery-monitor_1.0-r0.0_arm64.deb`；`/usr/bin/battery-monitor` + service/preset；`Depends: libc6` |
+| `battery-monitor` Yocto 交叉编译 | 同上 | `battery-monitor_1.0-r0.1_arm64.deb`；`/usr/bin/battery-monitor` + service/preset；`Depends: libc6`；CSV 表头/无效 `nan`/绝对周期采样 |
 | `customer-display` Yocto 交叉编译 | 同上 | `customer-display_1.0-r0.2_arm64.deb`；`/usr/bin/customer-display` + `customer-display.sh` + service；`Depends: libsdl2-2.0-0`；`NEEDED libSDL2-2.0.so.0` |
 | `.deb` service/wrapper 核对 | 解包实际 `.deb` | service = `User=weston`、`ExecStart=/usr/bin/customer-display.sh`、`WantedBy=multi-user.target`；wrapper = `UID_W=$(id -u)`，查 `/run/user/$UID_W` 和 `/home/weston`，wayland-0/1，`/opt/logo.bmp` |
 | MP1 core 镜像能力 | `build-openstlinuxweston-stm32mp13-disco-test` manifest/rootfs | 无 Weston/Python/SDL2；有 `systemd-networkd` + `80-wired.network`（DHCP=yes） |
 | MP1 `st-image-weston` SDL2 | packagegroup 检查 | `packagegroup-framework-core-base-display` 在 `opengl` 下依赖 `libsdl2`/`libsdl2-image`；MP2 Weston manifest 已见 SDL2 |
-| AI 导航测试 | 全新 subagent | 第一轮发现 Wayland/重启/图片/网络误判等问题，已修；电池工程师场景最终审查：功能内容 PASS |
+| AI 导航测试 | 全新 subagent | 第一轮发现 Wayland/重启/图片/网络误判等问题，已修；电池/电机/传感器/工业协议通用性测试：已补 domain matrix、安全边界、工业依赖；无匹配领域按 `templates/README.md` 生成新骨架 |
 
 ## 未做（交付前需补）
 
@@ -25,6 +25,9 @@
   `cortexa7t2hf-neon-vfpv4`/armhf 的 `.deb`；service/wrapper 与架构无关，但二进制不能混用。
 - **未验证真实 Wayland socket 路径**：wrapper 同时兼容 `/run/user/<uid>` 和
   `/home/weston`；上板需 `ls -l` 确认实际路径。
+- **未实现/测试 motor-monitor、industrial-gateway 成品模板**：本 skill 提供领域矩阵、
+  接口/安全/依赖规则和通用骨架；电机/工业/视觉/音频的专用代码需按客户硬件/BSP
+  生成，并做台架/安全验证。
 
 ## 结论
 

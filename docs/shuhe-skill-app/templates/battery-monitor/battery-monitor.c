@@ -12,6 +12,7 @@
  * fuel gauge or IIO/hwmon device. It does not write kernel drivers.
  */
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,8 +73,13 @@ int main(void)
     FILE *log = NULL;
     if (logpath && logpath[0]) {
         log = fopen(logpath, "a");
-        if (!log)
+        if (!log) {
             fprintf(stderr, "cannot open BAT_LOG=%s: %s\n", logpath, strerror(errno));
+        } else {
+            fseek(log, 0, SEEK_END);
+            if (ftell(log) == 0)
+                fprintf(log, "timestamp,voltage_v,current_a,temp_c,soc_pct\n");
+        }
     }
 
     struct sigaction sa;
@@ -84,19 +90,24 @@ int main(void)
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 
+    struct timespec next;
+    clock_gettime(CLOCK_MONOTONIC, &next);
+
     while (g_running) {
         long uv = 0, ua = 0, t10 = 0;
         int ok_v = (read_long_file(vpath, &uv) == 0);
         int ok_i = (read_long_file(ipath, &ua) == 0);
         int ok_t = (read_long_file(tpath, &t10) == 0);
 
-        double voltage = ok_v ? (double)uv / 1000000.0 : 0.0;
-        double current = ok_i ? (double)ua / 1000000.0 : 0.0;
-        double temp = ok_t ? (double)t10 / 10.0 : 0.0;
+        double voltage = ok_v ? (double)uv / 1000000.0 : NAN;
+        double current = ok_i ? (double)ua / 1000000.0 : NAN;
+        double temp = ok_t ? (double)t10 / 10.0 : NAN;
 
         /* Simple linear SOC placeholder: replace with the customer's
          * coulomb-counting / OCV lookup algorithm. */
-        double soc = clamp((voltage - 3.0) / (4.2 - 3.0) * 100.0, 0.0, 100.0);
+        double soc = (ok_v && isfinite(voltage))
+                         ? clamp((voltage - 3.0) / (4.2 - 3.0) * 100.0, 0.0, 100.0)
+                         : NAN;
 
         time_t now = time(NULL);
         struct tm tmv;
@@ -113,9 +124,9 @@ int main(void)
         if (!ok_t)
             fprintf(stderr, "cannot read %s\n", tpath);
 
-        if (temp > 45.0)
+        if (isfinite(temp) && temp > 45.0)
             printf("ALERT: temperature %.1fC > 45C\n", temp);
-        if (ok_v && voltage < 3.0)
+        if (isfinite(voltage) && voltage < 3.0)
             printf("ALERT: voltage %.3fV < 3.0V\n", voltage);
 
         if (log) {
@@ -124,10 +135,8 @@ int main(void)
             fflush(log);
         }
 
-        struct timespec req;
-        req.tv_sec = interval;
-        req.tv_nsec = 0;
-        if (nanosleep(&req, NULL) < 0 && errno == EINTR)
+        next.tv_sec += interval;
+        if (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL) == EINTR)
             continue;
     }
 

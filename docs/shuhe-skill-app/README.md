@@ -2,6 +2,8 @@
 
 本目录是 `shuhe-ostl-deploy`（MP1 BSP/部署手册）的 **companion skill**：
 只做上层 app，不改 kernel/uboot/dts；客户不需要知道交叉编译器。
+适用于任意领域：电池/电机/传感器/数据采集/工业协议/网络/显示等；
+电池只是模板里的一个示例。
 
 ## 文件清单
 
@@ -12,6 +14,7 @@
 | `README.md` | 本文件：使用方式、stub 安装、维护纪律 |
 | `DOCKER_VM.md` | Docker/虚拟机交付、预编译镜像、展会演示流程 |
 | `TEST_RESULTS.md` | 已做/未做的测试范围（编译、.deb、MP1/MP2 边界） |
+| `templates/README.md` | 模板选择/泛化/无匹配领域时生成新骨架 |
 | `templates/layer.conf` | `meta-customer-app` 的 layer.conf |
 | `templates/network-app/` | TCP server C + recipe + systemd service |
 | `templates/battery-monitor/` | 电池/传感器 C + sysfs + recipe + systemd service |

@@ -22,6 +22,23 @@
 > 显示 app service 用 `multi-user.target` + `After=weston-graphical-session.service`；
 > 不要用 `graphical.target`（实际 default 是 multi-user，重启不会自启）。
 
+## 1.1 任意领域 app 矩阵（电池只是示例）
+
+| 领域 | 典型输入 | Linux 接口 | 典型输出 | 起点 |
+|------|----------|------------|----------|------|
+| 电池/BMS | 电压/电流/温度 | `power_supply`/`hwmon`/IIO | GPIO/PWM/继电器、CSV、网络 | `battery-monitor` |
+| 电机/运动 | 编码器/电流/限位 | GPIO/IIO/PWM/counter | PWM/GPIO/继电器 | `battery-monitor` + PWM/GPIO/counter |
+| 温度/压力/流量 | 传感器 | IIO/hwmon/I2C/SPI | 日志/显示/网络 | `battery-monitor` 改路径/单位 |
+| 数据采集/仪表 | ADC/多路传感器 | IIO/spidev/i2c-dev | CSV/SQLite/网络 | `battery-monitor` / `network-app` |
+| 工业协议 | Modbus/CAN/串口 | libmodbus/SocketCAN/tty | 网络/PLC/数据库 | `network-app` + 协议库 |
+| 网络/云 | socket/MQTT/HTTP | 网络 | 网络/存储 | `network-app` |
+| HMI/显示 | 图片/文本/UI | Weston/SDL2/GTK/Qt | 屏幕 | `display-app` |
+| 视觉 | Camera | V4L2/libcamera/GStreamer | 屏幕/网络 | BSP camera + app |
+| 音频 | Mic/Line | ALSA/PipeWire | 播放/网络 | BSP audio + app |
+
+> 客户可能是任何领域的工程师；不要默认电池。先问“输入/算法/输出/实时性/安全”，
+> 再选最接近的模板或生成新骨架。需要新驱动/DTS/pinctrl/硬实时 → BSP skill。
+
 ## 2. MP1 镜像能力矩阵
 
 | 镜像 | Weston/Wayland | GTK/Python | SDL2 | 适合 |
@@ -73,6 +90,42 @@
 - 传感器没有内核驱动、或内核没暴露 `power_supply`/`hwmon`/IIO → 转
   `shuhe-ostl-deploy`，不要在 app layer 写 kernel driver。
 - 没有硬件时用 mock sysfs 验证逻辑（见 `SKILL.md` §5.2）。
+
+## 3.2 电机/运动（安全边界）
+
+| 功能 | 优先接口 | 说明 |
+|------|----------|------|
+| 电流 | IIO/hwmon | 确认分流器/放大器/ADC 链路 |
+| 编码器 | `/sys/bus/counter/devices/counterX` 或 GPIO | 高速编码器不要用用户态 GPIO 轮询 |
+| PWM | `/sys/class/pwm/pwmchipN` | 简单低速负载；BLDC 六路/死区要 BSP/M33 |
+| 方向/使能/继电器 | `libgpiod` / `/dev/gpiochipN` | 确认引脚未被占用 |
+| 故障输出 | PWM=0、继电器断开 | 必须有确定的 fail-safe |
+
+- **软件过流不能当安全保护**：安全过流用硬件比较器 → 定时器 break → 驱动器关断，
+  或 M33 实时方案；Linux app 只做监控/记录/通信。
+- 安全类 service 用 `Restart=on-failure` + `StartLimitBurst`，**不要 `Restart=always`**；
+  故障要锁存，不能自动重启后重新驱动电机。
+- 可选 `WatchdogSec` + 硬件 watchdog。
+- 硬实时（µs 级电流环/FOC/伺服）转 M33/BSP，不要承诺 Linux 用户态。
+
+## 3.3 工业协议（Modbus/CAN/MQTT）
+
+| 功能 | 方案 | 依赖/边界 |
+|------|------|-----------|
+| Modbus TCP | `libmodbus` | 纯 app；端口 502、Unit ID、超时/重连 |
+| Modbus RTU/RS485 | `libmodbus` + tty | RS485 DE/终端/偏置要 BSP/硬件确认 |
+| CAN/CAN FD | SocketCAN | 内核 `can0`、bitrate/采样点/终端/收发器；本板 DTS 可能 disabled → BSP |
+| MQTT | libmosquitto | `DEPENDS=mosquitto`，`RDEPENDS=libmosquitto1`；TLS 加 `ca-certificates` |
+| JSON | json-c | 点表/上报字段 |
+
+- Modbus RTU 的串口参数/从站 ID/寄存器表/字序必须问清；RTU 的 RS485 方向控制
+  不要靠用户态随便拉 GPIO。
+- CAN 应用要处理 `ENODEV`、`CAN_ERR_BUSOFF`，断线重试；`can-utils` 只用于测试。
+- MQTT 要指数退避重连、Keepalive、QoS、LWT、离线缓存/补传、TLS 时间校验。
+- 链接 `libmodbus`/`libmosquitto1` 的 app **不能只 scp 二进制**；整镜像或 `.deb`
+  带依赖安装。
+- service：网络类 `After=network-online.target` + `Wants`；CAN/RTU 等设备就绪，
+  但应用内部仍要重试，不能只靠 systemd 顺序。
 
 ## 4. Weston/显示环境
 
@@ -138,7 +191,9 @@ exec /usr/bin/customer-display /opt/logo.bmp
 | 文字 | `libsdl2-ttf` | `libsdl2-ttf` + 字体 |
 | HTTP | `curl` | `curl` |
 | JSON | `json-c` | `json-c` |
-| MQTT | `mosquitto` | `mosquitto` |
+| MQTT | `mosquitto` | `libmosquitto1`（TLS 还要 `ca-certificates`） |
+| Modbus | `libmodbus` | `libmodbus` |
+| CAN | 无（SocketCAN 在 libc/kernel） | BSP 提供 `can0`；`can-utils` 仅测试 |
 | SQLite | `sqlite3` | `sqlite3` |
 | OpenSSL | `openssl` | `openssl` |
 | GStreamer | `gstreamer1.0` | `gstreamer1.0-plugins-*` |

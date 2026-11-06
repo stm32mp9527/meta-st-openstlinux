@@ -2,9 +2,11 @@
 name: shuhe-ostl-app
 description: |
   STM32MP1 OpenSTLinux 上层应用开发手册（type 2 客户：不改 kernel/uboot/dts，
-  只开发 app）。是 shuhe-ostl-deploy 的 companion skill。
-  触发词：开发 app、上层应用、网络通讯程序、TCP/UDP/HTTP/MQTT、HDMI/LCD 显示、
-  图像程序、开机自启动、第三方开发、不碰底层、app recipe、bitbake app。
+  只开发 app；任意领域：电池/电机/传感器/数据采集/工业协议/网络/显示）。
+  是 shuhe-ostl-deploy 的 companion skill。
+  触发词：开发 app、上层应用、电池管理、电机、传感器、数据采集、Modbus、CAN、
+  网络通讯程序、TCP/UDP/HTTP/MQTT、HDMI/LCD 显示、图像程序、开机自启动、
+  第三方开发、不碰底层、app recipe、bitbake app。
   客户不需要知道交叉编译器；AI 负责生成 recipe、bitbake、打包、部署、开机自启。
 ---
 
@@ -132,6 +134,50 @@ command -v udhcpc connmanctl NetworkManager 2>/dev/null
 - 先问客户板子 IP/用户名/接口，不要猜。
 
 ## 3. 需求 intake（问清再写代码）
+
+### 3.0 任意领域 app（先做这个，不要假设客户是电池/网络/显示）
+
+客户可能是电池、电机、传感器、数据采集、工业协议、音频、视觉、PLC、仪器仪表
+等任何领域的工程师。**不要把“电池”当默认**；先问领域，再映射到 Linux 接口。
+
+必问：
+
+1. **领域/目标**：你是什么工程师？这个 app 要解决什么问题？给谁看/控制什么？
+2. **输入**：什么物理量/数据/协议？来自哪个接口？
+   （IIO / hwmon / power_supply / I2C / SPI / UART / CAN / USB / V4L2 / ALSA /
+   GPIO / 网络 / 文件）
+3. **处理**：客户自己的算法/协议/状态机；采样率、精度、实时性要求。
+4. **输出**：GPIO / PWM / 继电器 / 电机 / 屏幕 / 网络 / 存储 / 告警。
+5. **安全**：急停/互锁/默认安全状态/看门狗；失败时怎么处理。
+6. **运行**：开机自启、失败重启、日志、远程调试/升级。
+7. **内核接口**：当前内核是否已经暴露标准接口？没有则转 BSP，不要在 app 层写驱动。
+
+领域 → 接口 → 模板起点：
+
+| 领域 | 典型输入 | Linux 接口 | 典型输出 | 起点 |
+|------|----------|------------|----------|------|
+| 电池/BMS | 电压/电流/温度 | `power_supply`/`hwmon`/IIO | GPIO/PWM/继电器、CSV、网络 | `battery-monitor`（通用 sysfs 骨架） |
+| 电机/运动 | 编码器/电流/限位 | GPIO/IIO/PWM/counter | PWM/GPIO/继电器 | `battery-monitor` + PWM/GPIO；硬实时转 M33/BSP |
+| 温度/压力/流量 | 传感器 | IIO/hwmon/I2C/SPI | 日志/显示/网络 | `battery-monitor` 改路径/单位/算法 |
+| 数据采集/仪表 | ADC/传感器 | IIO/spidev/i2c-dev | CSV/SQLite/网络 | `battery-monitor` 或 `network-app` |
+| 工业协议 | Modbus/CAN/串口 | libmodbus/SocketCAN/tty | 网络/PLC/数据库 | `network-app` + 协议库 |
+| 网络/云 | socket/MQTT/HTTP | 网络 | 网络/存储 | `network-app` |
+| HMI/显示 | 图片/文本/UI | Weston/SDL2/GTK/Qt | 屏幕 | `display-app` |
+| 视觉 | Camera | V4L2/libcamera/GStreamer | 屏幕/网络 | BSP camera + app |
+| 音频 | Mic/Line | ALSA/PipeWire | 播放/网络 | BSP audio + app |
+
+> 硬实时（µs 级电机/电流环）不要承诺用 Linux 用户态 app 实现；用 M33/M4 或
+> BSP 的实时方案，Linux app 做监控/配置/通信。需要新驱动、DTS、pinctrl、实时补丁
+> → 转 `shuhe-ostl-deploy`。
+
+- **电机安全**：软件过流只能做监测/后备；安全过流用硬件比较器 → 定时器 break →
+  驱动器关断，或 M33。安全类 service 用 `Restart=on-failure` + 故障锁存，
+  不要 `Restart=always` 让故障后自动重启重新驱动电机；必须有 PWM=0/继电器断开的
+  fail-safe。
+- **工业协议**：Modbus 用 `libmodbus`；CAN 用 SocketCAN + 内核 `can0`（本板 DTS
+  可能 disabled，转 BSP）；MQTT 用 `libmosquitto`，运行时依赖是
+  `libmosquitto1` 不是 `mosquitto`。链接这些库的 app 不能只 scp 二进制，
+  要整镜像或 `.deb` 带依赖部署。
 
 ### 3.1 网络 app
 
@@ -266,7 +312,17 @@ nc <board-ip> 9000
   `Wants=network-online.target`，并确认 `systemd-networkd-wait-online.service` 存在；
   否则保持 `network.target`，让 app 先 bind/重试。
 
-### 5.2 电池管理/传感器 app（领域示例）
+### 5.2 传感器/数据采集/控制 app（电池只是示例）
+
+> `battery-monitor` 是一个**通用 sysfs 轮询/告警/CSV 骨架**：读 1~N 个 sysfs 值，
+> 做客户算法，输出日志/告警/控制。电池只是示例；温度、压力、流量、电机电流、
+> 仪表数据等，改路径/单位/算法即可。
+>
+> - 电机/运动：读电流/编码器/限位，PWM/GPIO 输出；**硬实时（µs 级电流环）转
+>   M33/BSP**，Linux app 做监控/配置/通信。
+> - 数据采集/仪表：IIO/SPI/I2C 读多路，写 CSV/SQLite，必要时 MQTT/HTTP 上传。
+> - 工业协议：Modbus/CAN/串口，用 `libmodbus`/SocketCAN/termios，套 `network-app`
+>   的 systemd/部署骨架。
 
 模板目录：`templates/battery-monitor/`
 
@@ -330,6 +386,14 @@ BAT_INTERVAL=1 BAT_LOG=/tmp/battery.csv \
 ```
 
 不要假设单位；`voltage_now` 常见是 uV，`temp` 常见是 0.1°C；读错会得到离谱 SOC。
+
+生产采集还要注意：
+
+- CSV 首次创建写表头；按天/大小轮转，避免 1 Hz 长期写满 eMMC。
+- 读失败写 `invalid`/`nan` 并置质量码，**不要写 0.0 冒充有效数据**。
+- 用 `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` 做绝对周期采样，避免漂移。
+- 确认 RTC/NTP；断电后时间回退会让 CSV 时间错乱。
+- 告警要落日志/GPIO/继电器/MQTT，不能只 printf 到 journal。
 
 ## 6. 显示 app 模板
 
@@ -547,6 +611,7 @@ ssh root@<board-ip> 'systemctl status <app>'
 
 ## 11. 模板索引
 
+- `templates/README.md` —— 模板选择/泛化；无匹配领域时生成新骨架
 - `templates/layer.conf` —— `meta-customer-app` 的 layer.conf
 - `templates/network-app/` —— TCP server C + recipe + service
 - `templates/battery-monitor/` —— 电池/传感器 C + recipe + service（sysfs/IIO/hwmon）
