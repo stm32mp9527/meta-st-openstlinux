@@ -22,7 +22,17 @@
    这些底层需求转 `shuhe-ostl-deploy`。
 4. 自动创建 `meta-customer-app`、app recipe、systemd service，编译、部署、验证。
 5. 最后告诉我：**app 源码在哪、我改完以后怎么让你重建**。不要让我手写 Makefile。
-6. 如果项目还没同步，按 AI 手册里的流程处理；不要让我学 Yocto 命令。
+6. 如果项目还没同步，按下面的流程处理；不要让我学 Yocto 命令。
+
+如果还没有项目（**AI 执行，不要让我做**）：
+
+```bash
+mkdir -p <ROOT> && cd <ROOT>
+repo init -u https://github.com/stm32mp9527/oe-manifest.git -b shuhe-dev -m default.xml
+repo sync -j8
+```
+
+sync 完再读 app skill。
 
 ---
 
