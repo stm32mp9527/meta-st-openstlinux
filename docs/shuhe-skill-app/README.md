@@ -61,3 +61,10 @@ cp -r /tmp/om/skill-app ~/.config/opencode/skills/shuhe-ostl-app
 - 模板改动必须在 Yocto 环境实际 build 过（至少 C 编译 + recipe parse）。
 - 不要在手册里写死 `/home/xxx`；用 `<ROOT>`/`<BUILD>`/`<DEPLOY>`。
 - 不把 app 模板塞进 BSP skill；BSP 与 app 分开，避免客户误改底层。
+
+## 交付方式（repo 为主，VM 可选）
+
+- 主交付：客户在 Linux 服务器/PC 上 `repo sync` + 本 skill；**不需要虚拟机**。
+- 可选：没有 Linux 环境、需要隔离或展会演示时，才用 VM/Docker。
+- 统一客户入口（在项目内）：
+  `../../../meta-st-stm32mp/docs/shuhe-skill/CUSTOMER_PROMPT.md`
